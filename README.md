@@ -16,20 +16,22 @@ This is a modern take on a late-1990s experiment: the same idea, but this time t
 - Each link carries the number of half-moves played so far. If two visitors race, the second one gets a "too late, someone else moved first" page showing the new position.
 - The same visitor can't make two moves in a row (see Privacy below), so one agent can't play both colors in a burst.
 - A game ends on checkmate, stalemate, insufficient material, the fifty-move rule, threefold repetition, or after 300 half-moves (drawn). The last 25 finished games are remembered.
-- The page lists the most recent moves with who played them, as far as the visitor's browser or agent identifies itself (for example "Browser (Firefox)" or "ChatGPT / OpenAI"). This is only a hint, since any client can claim to be anything.
+- The page lists the most recent moves with who played them. By default this is a label made from the visitor's browser or agent identification (for example "Browser (Firefox)" or "ChatGPT / OpenAI"). Many agent tools pretend to be a browser, so those show up as "Browser-like client".
+- Visitors can name themselves by adding `&who=YourName` to the end of a move link (up to 24 letters, digits, spaces, dots, dashes or underscores). Such names are marked "(self-reported)" in the log, and the page counts how many moves came with one, as a small measure of how cooperative visitors are.
+- Everything in the log is only a hint, since any client can claim to be anything.
 
 ## Endpoints
 
 | Path | What it does |
 | --- | --- |
 | `/` | The game page for people and agents |
-| `/move?ply=N&m=MOVE` | Plays a move. `ply` is the number of half-moves played so far; `m` is standard notation such as `Nf3`, `exd5`, `O-O`, `e8=Q`, or coordinates such as `g1f3` |
-| `/api/state` | The same information as JSON: FEN, moves, who played each one, legal moves, finished games |
+| `/move?ply=N&m=MOVE` | Plays a move. `ply` is the number of half-moves played so far; `m` is standard notation such as `Nf3`, `exd5`, `O-O`, `e8=Q`, or coordinates such as `g1f3`. Optional: `&who=YourName` |
+| `/api/state` | The same information as JSON: FEN, moves, who played each one (and whether the name was self-reported), legal moves, finished games |
 | `/robots.txt` | Allows everything, including agents that check it |
 
 ## Privacy
 
-- The game stores the moves and, for each move, a short label made from the visitor's `User-Agent` header (for example "Browser (Chrome)").
+- The game stores the moves and, for each move, either the optional `who` name the visitor chose to give, or a short label made from the visitor's `User-Agent` header (for example "Browser (Chrome)"). Names are cleaned to a few harmless characters.
 - To enforce "no two moves in a row from the same visitor", it keeps a short one-way hash of the last mover's IP address. The IP address itself is never stored.
 
 ## How it is built

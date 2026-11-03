@@ -32,7 +32,7 @@ export class Game extends DurableObject {
       const move = (url.searchParams.get("m") ?? "").slice(0, 20);
       const ip = request.headers.get("CF-Connecting-IP") || "";
       const agent = agentLabel(request.headers.get("User-Agent"));
-      const res = tryMove(this.store, { ply, move, ipHash: ip ? await hashIp(ip) : "", agent });
+      const res = tryMove(this.store, { ply, move, ipHash: ip ? await hashIp(ip) : "", agent, who: url.searchParams.get("who") ?? "" });
       if (res.status === 200) await this.ctx.storage.put("store", this.store);
       return html(renderPage(this.store, res), res.status);
     }

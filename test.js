@@ -1,6 +1,6 @@
 // test.js - run with: node test.js
 import { parseFen, perft, START_FEN, sanList } from "./chess.js";
-import { freshStore, tryMove, renderPage, stateJson, agentLabel } from "./app.js";
+import { freshStore, tryMove, renderPage, stateJson, agentLabel, cleanWho } from "./app.js";
 
 let failed = 0;
 const check = (name, ok, extra = "") => {
@@ -79,6 +79,40 @@ for (const [name, fen, depth, expected] of perfts) {
   const r = tryMove(old, { ply: 2, move: "Nc3", ipHash: "C", agent: "Claude / Anthropic" });
   check("old saved game accepts a move", r.status === 200);
   check("old moves padded as unknown", old.game.by.join("|") === "unknown|unknown|Claude / Anthropic");
+}
+
+// 2c. Self-reported names (&who=).
+{
+  check("who: plain name kept", cleanWho("OpenCode-Qwen 3") === "OpenCode-Qwen 3");
+  check("who: markup and symbols removed", cleanWho("<b>Hi</b>; DROP 'x'") === "bHib DROP x");
+  check("who: shortened to 24", cleanWho("a".repeat(100)).length === 24);
+  check("who: empty and missing", cleanWho("") === "" && cleanWho(undefined) === "" && cleanWho("   ") === "");
+  check("generic browser header gets neutral label", agentLabel("Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko)") === "Browser-like client");
+
+  const s = freshStore();
+  tryMove(s, { ply: 0, move: "e4", ipHash: "A", agent: "Browser-like client", who: "OpenCode-Qwen" });
+  tryMove(s, { ply: 1, move: "e5", ipHash: "B", agent: "Browser (Firefox)" });
+  check("self-reported name wins over user agent", s.game.by[0] === "OpenCode-Qwen" && s.game.named[0] === true);
+  check("no name falls back to user agent", s.game.by[1] === "Browser (Firefox)" && s.game.named[1] === false);
+  check("counters", s.stats.moves === 2 && s.stats.named === 1);
+  const page = renderPage(s, null);
+  check("page marks self-reported names", page.includes("OpenCode-Qwen") && page.includes("(self-reported)"));
+  check("page shows the counter", page.includes("1 of 2 moves came with a self-reported name"));
+  check("page invites agents to add who", page.includes("&amp;who=YourName"));
+  check("api shows the flag and counters", stateJson(s).move_log[0].self_reported === true && stateJson(s).moves_with_self_reported_name === 1);
+
+  // The game that is already running (saved before names and counters existed) must keep working.
+  const old = freshStore();
+  old.game.san = ["e4", "Nf6"];
+  old.game.by = ["unknown", "unknown"];
+  delete old.game.named;
+  delete old.stats;
+  old.game.fen = "rnbqkb1r/pppppppp/5n2/8/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 1 2";
+  old.game.reps = { "rnbqkb1r/pppppppp/5n2/8/4P3/8/PPPP1PPP/RNBQKBNR w KQkq -": 1 };
+  check("running game renders without counters", renderPage(old, null).includes("Game #1"));
+  const r = tryMove(old, { ply: 2, move: "Nc3", ipHash: "C", agent: "Browser-like client", who: "Tester" });
+  check("running game accepts a named move", r.status === 200 && old.game.named.join() === "false,false,true");
+  check("counters start from zero", old.stats.moves === 1 && old.stats.named === 1);
 }
 
 // 3. Random games played to the end through the public functions.

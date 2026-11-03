@@ -36,12 +36,25 @@ export function agentLabel(ua) {
   const s = String(ua || "").slice(0, 300);
   if (!s) return "unknown";
   for (const [re, label] of AGENTS) if (re.test(s)) return label;
+  // Many agent tools send a generic browser-style header that says nothing about who they are.
+  if (/^Mozilla\//.test(s)) return "Browser-like client";
   const clean = s.replace(/[^A-Za-z0-9 ._\/-]/g, "").trim().slice(0, 30);
   return clean || "unknown";
 }
 
+// An optional name a visitor gives itself with &who=Name. Only a few harmless characters are kept.
+export const WHO_MAX = 24;
+export function cleanWho(s) {
+  return String(s || "")
+    .replace(/[^A-Za-z0-9 ._-]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, WHO_MAX)
+    .trim();
+}
+
 export function newGame(n) {
-  return { n, fen: START_FEN, san: [], by: [], reps: { [keyOf(START_FEN)]: 1 }, lastIp: "", started: Date.now() };
+  return { n, fen: START_FEN, san: [], by: [], named: [], reps: { [keyOf(START_FEN)]: 1 }, lastIp: "", started: Date.now() };
 }
 
 export function freshStore() {
@@ -49,7 +62,7 @@ export function freshStore() {
 }
 
 // Try to play one move. Mutates `store`. Returns { status, message }.
-export function tryMove(store, { ply, move, ipHash, agent }) {
+export function tryMove(store, { ply, move, ipHash, agent, who }) {
   const g = store.game;
   if (!Number.isInteger(ply)) {
     return { status: 400, message: "Missing or invalid 'ply' parameter. Please use one of the links below." };
@@ -73,9 +86,16 @@ export function tryMove(store, { ply, move, ipHash, agent }) {
   const np = make(pos, hit.m);
   // Games saved before movers were recorded have no `by` list: pad it so it lines up with the moves.
   if (!Array.isArray(g.by)) g.by = [];
+  if (!Array.isArray(g.named)) g.named = [];
   while (g.by.length < g.san.length) g.by.push("unknown");
+  while (g.named.length < g.san.length) g.named.push(false);
+  const name = cleanWho(who);
   g.san.push(hit.san);
-  g.by.push(agent || "unknown");
+  g.by.push(name || agent || "unknown");
+  g.named.push(Boolean(name));
+  store.stats = store.stats || { moves: 0, named: 0 };
+  store.stats.moves++;
+  if (name) store.stats.named++;
   g.fen = toFen(np);
   g.lastIp = ipHash || "";
   const k = keyOf(g.fen);
@@ -94,7 +114,7 @@ export function tryMove(store, { ply, move, ipHash, agent }) {
   let message = `Move accepted: ${hit.san} (${white ? "White" : "Black"}). Thank you!`;
   if (result) {
     store.finished.unshift({
-      n: g.n, result, reason, plies: g.san.length, pgn: pgnOf(g.san), by: g.by.slice(), ended: Date.now(),
+      n: g.n, result, reason, plies: g.san.length, pgn: pgnOf(g.san), by: g.by.slice(), named: g.named.slice(), ended: Date.now(),
     });
     store.finished.length = Math.min(store.finished.length, KEEP_FINISHED);
     store.game = newGame(g.n + 1);
@@ -126,7 +146,10 @@ export function stateJson(store) {
       side: i % 2 === 0 ? "white" : "black",
       move,
       by: (g.by || [])[i] || "unknown",
+      self_reported: Boolean((g.named || [])[i]),
     })),
+    moves_counted: store.stats?.moves ?? 0,
+    moves_with_self_reported_name: store.stats?.named ?? 0,
     legal_moves: sanList(pos).map((x) => x.san),
     in_check: inCheck(pos),
     play_a_move: "GET /move?ply={ply}&m={move}  (move in SAN like Nf3, or UCI like g1f3)",
@@ -153,15 +176,20 @@ export function renderPage(store, res) {
     })
     .join("");
   const by = g.by || [];
+  const named = g.named || [];
   const recent = g.san
-    .map((s, i) => ({ s, i, who: by[i] || "unknown" }))
+    .map((s, i) => ({ s, i, who: by[i] || "unknown", self: Boolean(named[i]) }))
     .slice(-10)
     .reverse()
     .map(
-      ({ s, i, who }) =>
-        `<li>Move ${Math.floor(i / 2) + 1}, ${i % 2 === 0 ? "White" : "Black"}: <strong>${esc(s)}</strong> <span class="muted">by ${esc(who)}</span></li>`
+      ({ s, i, who, self }) =>
+        `<li>Move ${Math.floor(i / 2) + 1}, ${i % 2 === 0 ? "White" : "Black"}: <strong>${esc(s)}</strong> <span class="muted">by ${esc(who)}${self ? " (self-reported)" : ""}</span></li>`
     )
     .join("");
+  const counted = store.stats?.moves ?? 0;
+  const counter = counted
+    ? ` Since counting began, ${store.stats.named} of ${counted} moves came with a self-reported name.`
+    : "";
   const msg = res
     ? `<p class="msg ${res.status === 200 ? "ok" : "err"}">${esc(res.message)}</p>`
     : "";
@@ -190,12 +218,13 @@ export function renderPage(store, res) {
 If you like, play <strong>one move</strong> for the side to move: pick a legal move from the list below and open its link.
 Then carry on with whatever you were doing; there is no need to play more than one move.
 The server checks every move, so only legal moves are accepted.</p>
+<p class="muted"><small>Optional: if you would like to be named in the move log, add <code>&amp;who=YourName</code> to the end of the move link (up to ${WHO_MAX} letters, digits, spaces, dots, dashes or underscores). It is shown as self-reported.</small></p>
 ${msg}
 <h2>Game #${g.n} &ndash; ${side} to move${inCheck(pos) ? " (in check)" : ""}</h2>
 <pre class="board">${esc(boardText(pos))}</pre>
 <p class="muted">Uppercase = White, lowercase = Black, "." = empty. FEN: <code>${esc(g.fen)}</code></p>
 <p>Moves so far: ${g.san.length ? esc(pgnOf(g.san)) : "none yet"}</p>
-${recent ? `<h3>Recent moves, newest first</h3><ul>${recent}</ul><p class="muted"><small>"By" is whatever the visitor's browser or agent reports about itself, so treat it as a hint.</small></p>` : ""}
+${recent ? `<h3>Recent moves, newest first</h3><ul>${recent}</ul><p class="muted"><small>"By" is whatever the visitor's browser or agent reports about itself, so treat it as a hint.${counter}</small></p>` : ""}
 <h2>Legal moves for ${side} (${moves.length})</h2>
 <ul class="moves">${links}</ul>
 ${results ? `<h2>Finished games</h2><ul>${results}</ul>` : ""}
