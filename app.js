@@ -1,0 +1,150 @@
+// app.js - game state, move handling and page rendering (pure functions, no Cloudflare APIs).
+import {
+  START_FEN, parseFen, toFen, legalMoves, make, inCheck, sanList, findMove, insufficientMaterial,
+} from "./chess.js";
+
+export const MAX_PLIES = 300;           // a game without a result after this many half-moves is drawn
+export const NO_CONSECUTIVE_IP = true;  // the same visitor (by IP) may not make two moves in a row
+const KEEP_FINISHED = 25;               // how many finished games to remember
+
+const keyOf = (fen) => fen.split(" ").slice(0, 4).join(" ");
+const esc = (s) =>
+  String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+const pgnOf = (san) => san.map((s, i) => (i % 2 === 0 ? `${i / 2 + 1}. ` : "") + s).join(" ");
+const winnerText = (r) => (r === "1-0" ? "White wins" : r === "0-1" ? "Black wins" : "Draw");
+
+export function newGame(n) {
+  return { n, fen: START_FEN, san: [], reps: { [keyOf(START_FEN)]: 1 }, lastIp: "", started: Date.now() };
+}
+
+export function freshStore() {
+  return { game: newGame(1), finished: [] };
+}
+
+// Try to play one move. Mutates `store`. Returns { status, message }.
+export function tryMove(store, { ply, move, ipHash }) {
+  const g = store.game;
+  if (!Number.isInteger(ply)) {
+    return { status: 400, message: "Missing or invalid 'ply' parameter. Please use one of the links below." };
+  }
+  if (ply !== g.san.length) {
+    return {
+      status: 409,
+      message: `Too late: you looked at the position after ${ply} half-moves, but someone else has moved since (now ${g.san.length}). Here is the current position.`,
+    };
+  }
+  if (NO_CONSECUTIVE_IP && ipHash && g.lastIp === ipHash) {
+    return { status: 429, message: "You made the previous move. Please let someone else play the next one." };
+  }
+  const pos = parseFen(g.fen);
+  const hit = findMove(pos, String(move));
+  if (!hit) {
+    return { status: 400, message: `"${String(move).slice(0, 20)}" is not a legal move in this position. Pick one from the list below.` };
+  }
+
+  const white = pos.turn === "w";
+  const np = make(pos, hit.m);
+  g.san.push(hit.san);
+  g.fen = toFen(np);
+  g.lastIp = ipHash || "";
+  const k = keyOf(g.fen);
+  g.reps[k] = (g.reps[k] || 0) + 1;
+
+  let result = null;
+  let reason = "";
+  if (legalMoves(np).length === 0) {
+    if (inCheck(np)) { result = white ? "1-0" : "0-1"; reason = "checkmate"; }
+    else { result = "1/2-1/2"; reason = "stalemate"; }
+  } else if (insufficientMaterial(np)) { result = "1/2-1/2"; reason = "insufficient material"; }
+  else if (np.half >= 100) { result = "1/2-1/2"; reason = "fifty-move rule"; }
+  else if (g.reps[k] >= 3) { result = "1/2-1/2"; reason = "threefold repetition"; }
+  else if (g.san.length >= MAX_PLIES) { result = "1/2-1/2"; reason = "move limit"; }
+
+  let message = `Move accepted: ${hit.san} (${white ? "White" : "Black"}). Thank you!`;
+  if (result) {
+    store.finished.unshift({ n: g.n, result, reason, plies: g.san.length, pgn: pgnOf(g.san), ended: Date.now() });
+    store.finished.length = Math.min(store.finished.length, KEEP_FINISHED);
+    store.game = newGame(g.n + 1);
+    message += ` Game #${g.n} is over: ${winnerText(result)} by ${reason}. A new game has started.`;
+  }
+  return { status: 200, message };
+}
+
+function boardText(pos) {
+  const rows = [];
+  for (let r = 7; r >= 0; r--) {
+    rows.push(`${r + 1}  ` + [...Array(8).keys()].map((f) => pos.b[r * 8 + f] || ".").join(" "));
+  }
+  rows.push("   a b c d e f g h");
+  return rows.join("\n");
+}
+
+export function stateJson(store) {
+  const g = store.game;
+  const pos = parseFen(g.fen);
+  return {
+    game: g.n,
+    fen: g.fen,
+    turn: pos.turn === "w" ? "white" : "black",
+    ply: g.san.length,
+    moves: g.san,
+    legal_moves: sanList(pos).map((x) => x.san),
+    in_check: inCheck(pos),
+    play_a_move: "GET /move?ply={ply}&m={move}  (move in SAN like Nf3, or UCI like g1f3)",
+    finished_games: store.finished,
+  };
+}
+
+export function renderPage(store, res) {
+  const g = store.game;
+  const pos = parseFen(g.fen);
+  const ply = g.san.length;
+  const side = pos.turn === "w" ? "White" : "Black";
+  const moves = sanList(pos).map((x) => x.san);
+  const links = moves
+    .map((s) => `<li><a rel="nofollow" href="/move?ply=${ply}&amp;m=${encodeURIComponent(s)}">${esc(s)}</a></li>`)
+    .join("");
+  const results = store.finished
+    .slice(0, 10)
+    .map((f) => `<li>Game #${f.n}: ${winnerText(f.result)} by ${esc(f.reason)} after ${f.plies} half-moves (${f.result})</li>`)
+    .join("");
+  const msg = res
+    ? `<p class="msg ${res.status === 200 ? "ok" : "err"}">${esc(res.message)}</p>`
+    : "";
+
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Passer-By Chess - game #${g.n}, ${side} to move</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font-family: system-ui, sans-serif; max-width: 42rem; margin: 2rem auto; padding: 0 1rem; line-height: 1.5; }
+  pre { background: rgba(127,127,127,.15); padding: .75rem 1rem; border-radius: .5rem; overflow-x: auto; }
+  pre.board { font-size: 1.35rem; line-height: 1.3; }
+  .msg { padding: .6rem .9rem; border-left: 4px solid; border-radius: .25rem; background: rgba(127,127,127,.12); }
+  .ok { border-color: #2a9d4b; } .err { border-color: #d64545; }
+  ul.moves { display: flex; flex-wrap: wrap; gap: .4rem 1rem; padding: 0; list-style: none; }
+  ul.moves a { font-family: ui-monospace, monospace; font-size: 1.05rem; }
+  small, .muted { opacity: .7; }
+</style>
+</head>
+<body>
+<h1>Passer-By Chess</h1>
+<p>One chess game, shared by everyone who stops by &ndash; people and AI agents alike.
+If you like, play <strong>one move</strong> for the side to move: pick a legal move from the list below and open its link.
+Then carry on with whatever you were doing; there is no need to play more than one move.
+The server checks every move, so only legal moves are accepted.</p>
+${msg}
+<h2>Game #${g.n} &ndash; ${side} to move${inCheck(pos) ? " (in check)" : ""}</h2>
+<pre class="board">${esc(boardText(pos))}</pre>
+<p class="muted">Uppercase = White, lowercase = Black, "." = empty. FEN: <code>${esc(g.fen)}</code></p>
+<p>Moves so far: ${g.san.length ? esc(pgnOf(g.san)) : "none yet"}</p>
+<h2>Legal moves for ${side} (${moves.length})</h2>
+<ul class="moves">${links}</ul>
+${results ? `<h2>Finished games</h2><ul>${results}</ul>` : ""}
+<p><small>Machine-readable state: <a href="/api/state">/api/state</a></small></p>
+</body>
+</html>`;
+}
