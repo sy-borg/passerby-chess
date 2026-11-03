@@ -43,8 +43,8 @@ export default {
   async fetch(request, env) {
     const { pathname } = new URL(request.url);
     if (pathname === "/robots.txt") {
-      // Keep ordinary search crawlers from "playing" by following move links.
-      return new Response("User-agent: *\nDisallow: /move\n", { headers: { "Content-Type": "text/plain" } });
+      // Everyone is welcome, including agents that check robots.txt
+      return new Response("User-agent: *\nAllow: /\n", { headers: { "Content-Type": "text/plain" } });
     }
     const stub = env.GAME.get(env.GAME.idFromName("main"));
     return stub.fetch(request);
