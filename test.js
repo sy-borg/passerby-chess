@@ -1,6 +1,6 @@
 // test.js - run with: node test.js
 import { parseFen, perft, START_FEN, sanList } from "./chess.js";
-import { freshStore, tryMove, renderPage, stateJson } from "./app.js";
+import { freshStore, tryMove, renderPage, stateJson, agentLabel } from "./app.js";
 
 let failed = 0;
 const check = (name, ok, extra = "") => {
@@ -42,6 +42,43 @@ for (const [name, fen, depth, expected] of perfts) {
   seq.forEach((m, i) => tryMove(f, { ply: i, move: m, ipHash: i % 2 ? "B" : "A" }));
   check("checkmate archived as 0-1", f.finished[0]?.result === "0-1" && f.finished[0]?.reason === "checkmate");
   check("new game started after mate", f.game.n === 2 && f.game.san.length === 0);
+}
+
+// 2b. Who played each move.
+{
+  const labels = [
+    ["Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36 Edg/126.0", "Browser (Edge)"],
+    ["Mozilla/5.0 (X11; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0", "Browser (Firefox)"],
+    ["Mozilla/5.0 (Macintosh) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15", "Browser (Safari)"],
+    ["Mozilla/5.0 AppleWebKit/537.36 (compatible; Googlebot/2.1; +http://www.google.com/bot.html) Chrome/126 Safari/537.36", "Googlebot"],
+    ["Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko); compatible; ChatGPT-User/1.0; +https://openai.com/bot", "ChatGPT / OpenAI"],
+    ["Claude-User", "Claude / Anthropic"],
+    ["python-requests/2.32", "Python script"],
+    ["", "unknown"],
+  ];
+  for (const [ua, want] of labels) check(`label for "${ua.slice(0, 30)}"`, agentLabel(ua) === want, `(got "${agentLabel(ua)}")`);
+
+  const odd = agentLabel("MyCoolAgent/1.0 <script>alert(1)</script> and a very long tail that goes on and on");
+  check("unknown agents are cleaned and shortened", odd.startsWith("MyCoolAgent/1.0") && !/[<>()]/.test(odd) && odd.length <= 30, `(got "${odd}")`);
+
+  const s = freshStore();
+  tryMove(s, { ply: 0, move: "e4", ipHash: "A", agent: "ChatGPT / OpenAI" });
+  tryMove(s, { ply: 1, move: "e5", ipHash: "B", agent: "Browser (Firefox)" });
+  check("movers recorded per move", s.game.by.join("|") === "ChatGPT / OpenAI|Browser (Firefox)");
+  const page = renderPage(s, null);
+  check("page shows who moved", page.includes("by ChatGPT / OpenAI") && page.includes("by Browser (Firefox)"));
+  check("api move_log has movers", stateJson(s).move_log[1].by === "Browser (Firefox)" && stateJson(s).move_log[1].side === "black");
+
+  // A game saved by the previous version (moves but no `by` list) must keep working.
+  const old = freshStore();
+  old.game.san = ["e4", "Nf6"];
+  old.game.fen = "rnbqkb1r/pppppppp/5n2/8/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 1 2";
+  old.game.reps = { "rnbqkb1r/pppppppp/5n2/8/4P3/8/PPPP1PPP/RNBQKBNR w KQkq -": 1 };
+  delete old.game.by;
+  check("old saved game still renders", renderPage(old, null).includes("Game #1"));
+  const r = tryMove(old, { ply: 2, move: "Nc3", ipHash: "C", agent: "Claude / Anthropic" });
+  check("old saved game accepts a move", r.status === 200);
+  check("old moves padded as unknown", old.game.by.join("|") === "unknown|unknown|Claude / Anthropic");
 }
 
 // 3. Random games played to the end through the public functions.

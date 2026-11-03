@@ -1,7 +1,7 @@
 // worker.js - Cloudflare Worker entry point.
 // One Durable Object ("Game") holds the single shared game, so simultaneous visitors are handled one at a time.
 import { DurableObject } from "cloudflare:workers";
-import { freshStore, tryMove, renderPage, stateJson } from "./app.js";
+import { freshStore, tryMove, renderPage, stateJson, agentLabel } from "./app.js";
 
 const HEADERS = { "Cache-Control": "no-store" };
 const html = (body, status = 200) =>
@@ -31,7 +31,8 @@ export class Game extends DurableObject {
       const ply = parseInt(url.searchParams.get("ply") ?? "", 10);
       const move = (url.searchParams.get("m") ?? "").slice(0, 20);
       const ip = request.headers.get("CF-Connecting-IP") || "";
-      const res = tryMove(this.store, { ply, move, ipHash: ip ? await hashIp(ip) : "" });
+      const agent = agentLabel(request.headers.get("User-Agent"));
+      const res = tryMove(this.store, { ply, move, ipHash: ip ? await hashIp(ip) : "", agent });
       if (res.status === 200) await this.ctx.storage.put("store", this.store);
       return html(renderPage(this.store, res), res.status);
     }
@@ -43,8 +44,8 @@ export default {
   async fetch(request, env) {
     const { pathname } = new URL(request.url);
     if (pathname === "/robots.txt") {
-      // Everyone is welcome, including agents that check robots.txt
-      return new Response("User-agent: *\nAllow: /\n", { headers: { "Content-Type": "text/plain" } });
+      // Keep ordinary search crawlers from "playing" by following move links.
+      return new Response("User-agent: *\nDisallow: /move\n", { headers: { "Content-Type": "text/plain" } });
     }
     const stub = env.GAME.get(env.GAME.idFromName("main"));
     return stub.fetch(request);

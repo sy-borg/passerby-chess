@@ -13,8 +13,35 @@ const esc = (s) =>
 const pgnOf = (san) => san.map((s, i) => (i % 2 === 0 ? `${i / 2 + 1}. ` : "") + s).join(" ");
 const winnerText = (r) => (r === "1-0" ? "White wins" : r === "0-1" ? "Black wins" : "Draw");
 
+// Turn a User-Agent header into a short, readable label. This is only what the visitor reports about itself.
+const AGENTS = [
+  [/ChatGPT|OAI-SearchBot|GPTBot|OpenAI/i, "ChatGPT / OpenAI"],
+  [/Claude|Anthropic/i, "Claude / Anthropic"],
+  [/Perplexity/i, "Perplexity"],
+  [/Gemini|Google-Extended|GoogleOther/i, "Gemini / Google"],
+  [/Googlebot/i, "Googlebot"],
+  [/bingbot|BingPreview/i, "Bing"],
+  [/DuckAssistBot|DuckDuckBot/i, "DuckDuckGo"],
+  [/Mistral/i, "Mistral"],
+  [/curl\//i, "curl"],
+  [/python-requests|python-httpx|aiohttp|Python-urllib/i, "Python script"],
+  [/node-fetch|undici|axios/i, "Node script"],
+  [/Edg\//, "Browser (Edge)"],
+  [/Firefox\//, "Browser (Firefox)"],
+  [/Chrome\//, "Browser (Chrome)"],
+  [/Safari\//, "Browser (Safari)"],
+];
+
+export function agentLabel(ua) {
+  const s = String(ua || "").slice(0, 300);
+  if (!s) return "unknown";
+  for (const [re, label] of AGENTS) if (re.test(s)) return label;
+  const clean = s.replace(/[^A-Za-z0-9 ._\/-]/g, "").trim().slice(0, 30);
+  return clean || "unknown";
+}
+
 export function newGame(n) {
-  return { n, fen: START_FEN, san: [], reps: { [keyOf(START_FEN)]: 1 }, lastIp: "", started: Date.now() };
+  return { n, fen: START_FEN, san: [], by: [], reps: { [keyOf(START_FEN)]: 1 }, lastIp: "", started: Date.now() };
 }
 
 export function freshStore() {
@@ -22,7 +49,7 @@ export function freshStore() {
 }
 
 // Try to play one move. Mutates `store`. Returns { status, message }.
-export function tryMove(store, { ply, move, ipHash }) {
+export function tryMove(store, { ply, move, ipHash, agent }) {
   const g = store.game;
   if (!Number.isInteger(ply)) {
     return { status: 400, message: "Missing or invalid 'ply' parameter. Please use one of the links below." };
@@ -44,7 +71,11 @@ export function tryMove(store, { ply, move, ipHash }) {
 
   const white = pos.turn === "w";
   const np = make(pos, hit.m);
+  // Games saved before movers were recorded have no `by` list: pad it so it lines up with the moves.
+  if (!Array.isArray(g.by)) g.by = [];
+  while (g.by.length < g.san.length) g.by.push("unknown");
   g.san.push(hit.san);
+  g.by.push(agent || "unknown");
   g.fen = toFen(np);
   g.lastIp = ipHash || "";
   const k = keyOf(g.fen);
@@ -62,7 +93,9 @@ export function tryMove(store, { ply, move, ipHash }) {
 
   let message = `Move accepted: ${hit.san} (${white ? "White" : "Black"}). Thank you!`;
   if (result) {
-    store.finished.unshift({ n: g.n, result, reason, plies: g.san.length, pgn: pgnOf(g.san), ended: Date.now() });
+    store.finished.unshift({
+      n: g.n, result, reason, plies: g.san.length, pgn: pgnOf(g.san), by: g.by.slice(), ended: Date.now(),
+    });
     store.finished.length = Math.min(store.finished.length, KEEP_FINISHED);
     store.game = newGame(g.n + 1);
     message += ` Game #${g.n} is over: ${winnerText(result)} by ${reason}. A new game has started.`;
@@ -88,6 +121,12 @@ export function stateJson(store) {
     turn: pos.turn === "w" ? "white" : "black",
     ply: g.san.length,
     moves: g.san,
+    move_log: g.san.map((move, i) => ({
+      ply: i + 1,
+      side: i % 2 === 0 ? "white" : "black",
+      move,
+      by: (g.by || [])[i] || "unknown",
+    })),
     legal_moves: sanList(pos).map((x) => x.san),
     in_check: inCheck(pos),
     play_a_move: "GET /move?ply={ply}&m={move}  (move in SAN like Nf3, or UCI like g1f3)",
@@ -106,7 +145,22 @@ export function renderPage(store, res) {
     .join("");
   const results = store.finished
     .slice(0, 10)
-    .map((f) => `<li>Game #${f.n}: ${winnerText(f.result)} by ${esc(f.reason)} after ${f.plies} half-moves (${f.result})</li>`)
+    .map((f) => {
+      const players = [...new Set(f.by || [])].filter((x) => x !== "unknown").join(", ");
+      return `<li>Game #${f.n}: ${winnerText(f.result)} by ${esc(f.reason)} after ${f.plies} half-moves (${f.result})${
+        players ? ` &ndash; players: ${esc(players)}` : ""
+      }</li>`;
+    })
+    .join("");
+  const by = g.by || [];
+  const recent = g.san
+    .map((s, i) => ({ s, i, who: by[i] || "unknown" }))
+    .slice(-10)
+    .reverse()
+    .map(
+      ({ s, i, who }) =>
+        `<li>Move ${Math.floor(i / 2) + 1}, ${i % 2 === 0 ? "White" : "Black"}: <strong>${esc(s)}</strong> <span class="muted">by ${esc(who)}</span></li>`
+    )
     .join("");
   const msg = res
     ? `<p class="msg ${res.status === 200 ? "ok" : "err"}">${esc(res.message)}</p>`
@@ -141,6 +195,7 @@ ${msg}
 <pre class="board">${esc(boardText(pos))}</pre>
 <p class="muted">Uppercase = White, lowercase = Black, "." = empty. FEN: <code>${esc(g.fen)}</code></p>
 <p>Moves so far: ${g.san.length ? esc(pgnOf(g.san)) : "none yet"}</p>
+${recent ? `<h3>Recent moves, newest first</h3><ul>${recent}</ul><p class="muted"><small>"By" is whatever the visitor's browser or agent reports about itself, so treat it as a hint.</small></p>` : ""}
 <h2>Legal moves for ${side} (${moves.length})</h2>
 <ul class="moves">${links}</ul>
 ${results ? `<h2>Finished games</h2><ul>${results}</ul>` : ""}
