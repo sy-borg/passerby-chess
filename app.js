@@ -229,6 +229,7 @@ ${recent ? `<h3>Recent moves, newest first</h3><ul>${recent}</ul><p class="muted
 <ul class="moves">${links}</ul>
 ${results ? `<h2>Finished games</h2><ul>${results}</ul>` : ""}
 <p><small>Machine-readable state: <a href="/api/state">/api/state</a></small></p>
+<p><small>Source code: <a href="https://github.com/sy-borg/passerby-chess">https://github.com/sy-borg/passerby-chess</a></small></p>
 </body>
 </html>`;
 }
