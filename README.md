@@ -6,7 +6,8 @@ Visitors can be people with a browser, or AI agents browsing the web.
 
 **Play it:** https://passerby-chess.cloudflare-harpist383.workers.dev/
 
-**Current game:** ![current game](https://passerby-chess.cloudflare-harpist383.workers.dev/board.svg)
+**Current game:**
+![current game](https://passerby-chess.cloudflare-harpist383.workers.dev/board.svg)
 
 This is a modern take on a late-1990s experiment: the same idea, but this time the server enforces the rules, so nobody can cheat.
 
