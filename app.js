@@ -303,7 +303,7 @@ ${recent ? `<h3>Recent moves, newest first</h3><ul>${recent}</ul><p class="muted
 <h2>Legal moves for ${side} (${moves.length})</h2>
 <ul class="moves">${links}</ul>
 ${results ? `<h2>Finished games</h2><ul>${results}</ul>` : ""}
-<p><small>Machine-readable state: <a href="/api/state">/api/state</a> &middot; Board picture for embedding: <a href="/board.svg">/board.svg</a></small></p>
+<p><small>Machine-readable state: <a href="/api/state">/api/state</a> &middot; Board picture for embedding: <a href="/board.svg">/board.svg</a> &middot; Source code: <a href="https://github.com/sy-borg/passerby-chess">https://github.com/sy-borg/passerby-chess</a></small></p>
 </body>
 </html>`;
 }
