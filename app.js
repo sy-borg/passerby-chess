@@ -97,6 +97,7 @@ export function tryMove(store, { ply, move, ipHash, agent, who }) {
   store.stats.moves++;
   if (name) store.stats.named++;
   g.fen = toFen(np);
+  g.last = { from: hit.m.from, to: hit.m.to };
   g.lastIp = ipHash || "";
   const k = keyOf(g.fen);
   g.reps[k] = (g.reps[k] || 0) + 1;
@@ -130,6 +131,75 @@ function boardText(pos) {
   }
   rows.push("   a b c d e f g h");
   return rows.join("\n");
+}
+
+// A picture of the current position as a standalone SVG (works as an <img>, in READMEs, in chats...).
+const GLYPH = { K: "\u265A", Q: "\u265B", R: "\u265C", B: "\u265D", N: "\u265E", P: "\u265F" };
+const PIECE_FONTS = "'Segoe UI Symbol','Apple Symbols','Noto Sans Symbols 2','DejaVu Sans','Arial Unicode MS',sans-serif";
+
+export function renderBoardSvg(store) {
+  const g = store.game;
+  const pos = parseFen(g.fen);
+  const S = 56; // square size
+  const M = 30; // margin for the coordinates
+  const bottom = M + 8 * S;
+  const W = S * 8 + M * 2;
+  const H = bottom + 84;
+  const whiteToMove = pos.turn === "w";
+  const side = whiteToMove ? "White" : "Black";
+  const check = inCheck(pos);
+  const kingAt = pos.b.indexOf(whiteToMove ? "K" : "k");
+  const px = (sq) => M + (sq & 7) * S;
+  const py = (sq) => M + (7 - (sq >> 3)) * S;
+  const square = (sq, fill, extra = "") =>
+    `<rect x="${px(sq)}" y="${py(sq)}" width="${S}" height="${S}" fill="${fill}"${extra}/>`;
+
+  let body = "";
+  for (let sq = 0; sq < 64; sq++) body += square(sq, ((sq & 7) + (sq >> 3)) % 2 === 1 ? "#f0d9b5" : "#b58863");
+  if (g.last) for (const sq of [g.last.from, g.last.to]) body += square(sq, "#ffe24a", ' fill-opacity=".5"');
+  if (check) body += square(kingAt, "url(#chk)");
+  body += `<rect x="${M}" y="${M}" width="${S * 8}" height="${S * 8}" fill="none" stroke="#6b4a2f" stroke-width="2"/>`;
+
+  for (let i = 0; i < 8; i++) {
+    body += `<text x="${M + i * S + S / 2}" y="${bottom + 18}" text-anchor="middle" font-size="14" fill="#a8a29a">${"abcdefgh"[i]}</text>`;
+    body += `<text x="${M / 2}" y="${M + (7 - i) * S + S / 2 + 5}" text-anchor="middle" font-size="14" fill="#a8a29a">${i + 1}</text>`;
+  }
+
+  for (let sq = 0; sq < 64; sq++) {
+    const c = pos.b[sq];
+    if (!c) continue;
+    const isWhite = c === c.toUpperCase();
+    body +=
+      `<text class="p" x="${px(sq) + S / 2}" y="${py(sq) + S * 0.77}" text-anchor="middle" font-size="${Math.round(S * 0.84)}" ` +
+      `font-family="${PIECE_FONTS}" fill="${isWhite ? "#ffffff" : "#1b1b1b"}" stroke="${isWhite ? "#1b1b1b" : "#e9e9e9"}" ` +
+      `stroke-width="${isWhite ? 1.6 : 0.7}" paint-order="stroke">${GLYPH[c.toUpperCase()]}\uFE0E</text>`;
+  }
+
+  const n = g.san.length;
+  let line2;
+  if (n) {
+    const i = n - 1;
+    const who = (g.by || [])[i];
+    line2 = `Last move: ${Math.floor(i / 2) + 1}${i % 2 === 0 ? "." : "..."} ${g.san[i]}${who && who !== "unknown" ? " by " + who : ""}`;
+  } else if (store.finished.length) {
+    const f = store.finished[0];
+    line2 = `Previous game: ${winnerText(f.result)} by ${f.reason}`;
+  } else {
+    line2 = "A new game - be the first to move";
+  }
+  const line1 = `Game #${g.n} \u00B7 ${side} to move${check ? " \u00B7 check!" : ""}`;
+  const title = `Passer-By Chess, game ${g.n}, ${side} to move`;
+
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-labelledby="t d">
+<title id="t">${esc(title)}</title>
+<desc id="d">${esc(`Position (FEN): ${g.fen}. ${line2}`)}</desc>
+<defs><radialGradient id="chk"><stop offset="0" stop-color="#ff2a2a" stop-opacity=".95"/><stop offset=".6" stop-color="#e03030" stop-opacity=".55"/><stop offset="1" stop-color="#e03030" stop-opacity="0"/></radialGradient></defs>
+<rect width="${W}" height="${H}" rx="14" fill="#262421"/>
+${body}
+<text x="${W / 2}" y="${bottom + 50}" text-anchor="middle" font-family="system-ui,'Segoe UI',Helvetica,Arial,sans-serif" font-size="18" font-weight="600" fill="#f2efe9">${esc(line1)}</text>
+<text x="${W / 2}" y="${bottom + 72}" text-anchor="middle" font-family="system-ui,'Segoe UI',Helvetica,Arial,sans-serif" font-size="14" fill="#b9b3a8">${esc(line2)}</text>
+</svg>`;
 }
 
 export function stateJson(store) {
@@ -200,6 +270,10 @@ export function renderPage(store, res) {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Passer-By Chess - game #${g.n}, ${side} to move</title>
+<meta name="description" content="A chess game played one move at a time by whoever stops by: people and AI agents.">
+<meta property="og:title" content="Passer-By Chess">
+<meta property="og:description" content="One chess game, one move per visitor. People and AI agents take turns.">
+<meta property="og:type" content="website">
 <style>
   :root { color-scheme: light dark; }
   body { font-family: system-ui, sans-serif; max-width: 42rem; margin: 2rem auto; padding: 0 1rem; line-height: 1.5; }
@@ -221,6 +295,7 @@ The server checks every move, so only legal moves are accepted.</p>
 <p class="muted"><small>Optional: if you would like to be named in the move log, add <code>&amp;who=YourName</code> to the end of the move link (up to ${WHO_MAX} letters, digits, spaces, dots, dashes or underscores). It is shown as self-reported.</small></p>
 ${msg}
 <h2>Game #${g.n} &ndash; ${side} to move${inCheck(pos) ? " (in check)" : ""}</h2>
+<p><img src="/board.svg?v=${g.n}-${ply}" width="508" height="562" alt="Picture of the current position; the same position is shown as text below." style="max-width:100%;height:auto"></p>
 <pre class="board">${esc(boardText(pos))}</pre>
 <p class="muted">Uppercase = White, lowercase = Black, "." = empty. FEN: <code>${esc(g.fen)}</code></p>
 <p>Moves so far: ${g.san.length ? esc(pgnOf(g.san)) : "none yet"}</p>
@@ -228,8 +303,7 @@ ${recent ? `<h3>Recent moves, newest first</h3><ul>${recent}</ul><p class="muted
 <h2>Legal moves for ${side} (${moves.length})</h2>
 <ul class="moves">${links}</ul>
 ${results ? `<h2>Finished games</h2><ul>${results}</ul>` : ""}
-<p><small>Machine-readable state: <a href="/api/state">/api/state</a></small></p>
-<p><small>Source code: <a href="https://github.com/sy-borg/passerby-chess">https://github.com/sy-borg/passerby-chess</a></small></p>
+<p><small>Machine-readable state: <a href="/api/state">/api/state</a> &middot; Board picture for embedding: <a href="/board.svg">/board.svg</a></small></p>
 </body>
 </html>`;
 }

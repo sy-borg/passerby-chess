@@ -1,7 +1,7 @@
 // worker.js - Cloudflare Worker entry point.
 // One Durable Object ("Game") holds the single shared game, so simultaneous visitors are handled one at a time.
 import { DurableObject } from "cloudflare:workers";
-import { freshStore, tryMove, renderPage, stateJson, agentLabel } from "./app.js";
+import { freshStore, tryMove, renderPage, renderBoardSvg, stateJson, agentLabel } from "./app.js";
 
 const HEADERS = { "Cache-Control": "no-store" };
 const html = (body, status = 200) =>
@@ -27,6 +27,12 @@ export class Game extends DurableObject {
     const url = new URL(request.url);
     if (url.pathname === "/") return html(renderPage(this.store, null));
     if (url.pathname === "/api/state") return json(stateJson(this.store));
+    if (url.pathname === "/board.svg") {
+      // Short cache so embedded copies (READMEs, chats) stay reasonably fresh without hammering the game.
+      return new Response(renderBoardSvg(this.store), {
+        headers: { "Content-Type": "image/svg+xml; charset=utf-8", "Cache-Control": "public, max-age=15" },
+      });
+    }
     if (url.pathname === "/move") {
       const ply = parseInt(url.searchParams.get("ply") ?? "", 10);
       const move = (url.searchParams.get("m") ?? "").slice(0, 20);

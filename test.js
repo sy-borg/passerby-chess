@@ -1,6 +1,6 @@
 // test.js - run with: node test.js
 import { parseFen, perft, START_FEN, sanList } from "./chess.js";
-import { freshStore, tryMove, renderPage, stateJson, agentLabel, cleanWho } from "./app.js";
+import { freshStore, tryMove, renderPage, renderBoardSvg, stateJson, agentLabel, cleanWho } from "./app.js";
 
 let failed = 0;
 const check = (name, ok, extra = "") => {
@@ -113,6 +113,41 @@ for (const [name, fen, depth, expected] of perfts) {
   const r = tryMove(old, { ply: 2, move: "Nc3", ipHash: "C", agent: "Browser-like client", who: "Tester" });
   check("running game accepts a named move", r.status === 200 && old.game.named.join() === "false,false,true");
   check("counters start from zero", old.stats.moves === 1 && old.stats.named === 1);
+}
+
+// 2d. The board picture (SVG).
+{
+  const pieces = (svg) => (svg.match(/class="p"/g) || []).length;
+  const s = freshStore();
+  let svg = renderBoardSvg(s);
+  check("svg: starts with 32 pieces and 64 squares", pieces(svg) === 32 && (svg.match(/fill="#(f0d9b5|b58863)"/g) || []).length === 64);
+  check("svg: new game caption", svg.includes("Game #1") && svg.includes("White to move") && svg.includes("be the first to move"));
+  check("svg: no highlight before the first move", !svg.includes('fill-opacity=".5"'));
+
+  tryMove(s, { ply: 0, move: "e4", ipHash: "A", agent: "Browser (Firefox)", who: "A & B <i>" });
+  tryMove(s, { ply: 1, move: "f6", ipHash: "B", agent: "Claude / Anthropic" });
+  svg = renderBoardSvg(s);
+  check("svg: last move highlighted on two squares", (svg.match(/fill-opacity="\.5"/g) || []).length === 2);
+  check("svg: last move in caption", svg.includes("Last move: 1... f6 by Claude / Anthropic"));
+
+  tryMove(s, { ply: 2, move: "Qh5", ipHash: "A", agent: "x", who: "A & B <i>" });
+  svg = renderBoardSvg(s);
+  check("svg: check is marked", svg.includes('fill="url(#chk)"') && svg.includes("check!"));
+  check("svg: names are escaped", !svg.includes("<i>") && svg.includes("by A B i"));
+  check("svg: describes the position for screen readers", svg.includes("<desc") && svg.includes("Position (FEN)"));
+
+  // Previous result is shown when a new game starts.
+  const f = freshStore();
+  ["f3", "e5", "g4", "Qh4#"].forEach((m, i) => tryMove(f, { ply: i, move: m, ipHash: i % 2 ? "B" : "A" }));
+  check("svg: shows previous result on a fresh game", renderBoardSvg(f).includes("Previous game: Black wins by checkmate"));
+
+  // A game saved before the last move was remembered still draws.
+  const old = freshStore();
+  old.game.san = ["e4", "Nf6"];
+  old.game.fen = "rnbqkb1r/pppppppp/5n2/8/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 1 2";
+  delete old.game.last;
+  check("svg: old saved game draws without highlight", renderBoardSvg(old).includes("<svg") && pieces(renderBoardSvg(old)) === 32);
+  check("page embeds the picture", renderPage(s, null).includes('src="/board.svg?v=1-3"'));
 }
 
 // 3. Random games played to the end through the public functions.
