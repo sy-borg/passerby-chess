@@ -54,7 +54,7 @@ export function cleanWho(s) {
 }
 
 export function newGame(n) {
-  return { n, fen: START_FEN, san: [], by: [], named: [], reps: { [keyOf(START_FEN)]: 1 }, lastIp: "", started: Date.now() };
+  return { n, fen: START_FEN, san: [], by: [], named: [], ts: [], reps: { [keyOf(START_FEN)]: 1 }, lastIp: "", started: Date.now() };
 }
 
 export function freshStore() {
@@ -85,14 +85,18 @@ export function tryMove(store, { ply, move, ipHash, agent, who }) {
   const white = pos.turn === "w";
   const np = make(pos, hit.m);
   // Games saved before movers were recorded have no `by` list: pad it so it lines up with the moves.
+  // Same for `ts` (when each move was made), which the Atom feed needs; 0 means "unknown".
   if (!Array.isArray(g.by)) g.by = [];
   if (!Array.isArray(g.named)) g.named = [];
+  if (!Array.isArray(g.ts)) g.ts = [];
   while (g.by.length < g.san.length) g.by.push("unknown");
   while (g.named.length < g.san.length) g.named.push(false);
+  while (g.ts.length < g.san.length) g.ts.push(0);
   const name = cleanWho(who);
   g.san.push(hit.san);
   g.by.push(name || agent || "unknown");
   g.named.push(Boolean(name));
+  g.ts.push(Date.now());
   store.stats = store.stats || { moves: 0, named: 0 };
   store.stats.moves++;
   if (name) store.stats.named++;
@@ -217,6 +221,7 @@ export function stateJson(store) {
       move,
       by: (g.by || [])[i] || "unknown",
       self_reported: Boolean((g.named || [])[i]),
+      ts: (g.ts || [])[i] || null,
     })),
     moves_counted: store.stats?.moves ?? 0,
     moves_with_self_reported_name: store.stats?.named ?? 0,
@@ -225,6 +230,79 @@ export function stateJson(store) {
     play_a_move: "GET /move?ply={ply}&m={move}  (move in SAN like Nf3, or UCI like g1f3)",
     finished_games: store.finished,
   };
+}
+
+// An Atom feed of the latest moves and finished games, newest first. Entries are self-contained:
+// the link always points at the live game, so the entry text carries the move, who played it and the PGN so far.
+const FEED_MOVES = 50;    // how many moves of the current game to include
+const FEED_FINISHED = 10; // how many finished games to include
+const FEED_MAX = 60;      // entries in the feed at most
+
+const isoDate = (ms) => new Date(ms || 0).toISOString();
+
+export function atomXml(store, base = "") {
+  const root = String(base || "").replace(/\/+$/, "");
+  const g = store.game;
+  const started = g.started || Date.now();
+  const entries = [];
+
+  const ts = g.ts || [];
+  const by = g.by || [];
+  const named = g.named || [];
+  const start = Math.max(0, g.san.length - FEED_MOVES);
+  g.san.slice(start).forEach((san, k) => {
+    const i = start + k;
+    const n = i + 1;
+    const who = by[i] || "unknown";
+    const self = Boolean(named[i]);
+    const label = `${Math.floor(i / 2) + 1}${i % 2 === 0 ? "." : "..."} ${san}`;
+    const mover = who !== "unknown" ? ` (by ${who}${self ? ", self-reported" : ""})` : "";
+    entries.push({
+      updated: ts[i] || started,
+      id: `${root}/#g${g.n}m${n}`,
+      title: `Game #${g.n}, move ${n}: ${label}${mover}`,
+      content:
+        `Move ${n} in game #${g.n}: ${i % 2 === 0 ? "White" : "Black"} plays ${san}` +
+        `${mover ? `, played by ${who}${self ? " (self-reported)" : ""}` : ""}. ` +
+        `Moves so far: ${pgnOf(g.san.slice(0, n))}`,
+    });
+  });
+
+  (store.finished || []).slice(0, FEED_FINISHED).forEach((f) => {
+    const players = [...new Set(f.by || [])].filter((x) => x !== "unknown").join(", ");
+    entries.push({
+      updated: f.ended || started,
+      id: `${root}/#g${f.n}end`,
+      title: `Game #${f.n} ended: ${winnerText(f.result)} by ${f.reason} (${f.result})`,
+      content:
+        `Game #${f.n} is over after ${f.plies} half-moves: ${winnerText(f.result)} by ${f.reason} (${f.result}). ` +
+        (players ? `Players: ${players}. ` : "") +
+        `Moves: ${f.pgn}`,
+    });
+  });
+
+  // Newest first. Equal timestamps (rapid moves in the same millisecond) fall back to push order, which is chronological.
+  entries.forEach((e, seq) => (e.seq = seq));
+  entries.sort((a, b) => b.updated - a.updated || b.seq - a.seq);
+  const top = entries.slice(0, FEED_MAX);
+  const entryXml = (e) => `<entry>
+<title>${esc(e.title)}</title>
+<link rel="alternate" type="text/html" href="${esc(root)}/"/>
+<id>${esc(e.id)}</id>
+<updated>${isoDate(e.updated)}</updated>
+<content type="text">${esc(e.content)}</content>
+</entry>`;
+
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+<title>Passer-By Chess</title>
+<subtitle>A chess game played one move at a time by whoever stops by: people and AI agents.</subtitle>
+<link rel="alternate" type="text/html" href="${esc(root)}/"/>
+<link rel="self" href="${esc(root)}/atom.xml"/>
+<id>${esc(root)}/</id>
+<updated>${isoDate(top[0]?.updated || started)}</updated>
+${top.map(entryXml).join("\n")}
+</feed>`;
 }
 
 export function renderPage(store, res) {
@@ -274,6 +352,7 @@ export function renderPage(store, res) {
 <meta property="og:title" content="Passer-By Chess">
 <meta property="og:description" content="One chess game, one move per visitor. People and AI agents take turns.">
 <meta property="og:type" content="website">
+<link rel="alternate" type="application/atom+xml" title="Passer-By Chess" href="/atom.xml">
 <style>
   :root { color-scheme: light dark; }
   body { font-family: system-ui, sans-serif; max-width: 42rem; margin: 2rem auto; padding: 0 1rem; line-height: 1.5; }
@@ -303,7 +382,7 @@ ${recent ? `<h3>Recent moves, newest first</h3><ul>${recent}</ul><p class="muted
 <h2>Legal moves for ${side} (${moves.length})</h2>
 <ul class="moves">${links}</ul>
 ${results ? `<h2>Finished games</h2><ul>${results}</ul>` : ""}
-<p><small>Machine-readable state: <a href="/api/state">/api/state</a> &middot; Board picture for embedding: <a href="/board.svg">/board.svg</a> &middot; Source code: <a href="https://github.com/sy-borg/passerby-chess">https://github.com/sy-borg/passerby-chess</a></small></p>
+<p><small>Machine-readable state: <a href="/api/state">/api/state</a> &middot; Board picture for embedding: <a href="/board.svg">/board.svg</a> &middot; Move feed: <a href="/atom.xml">/atom.xml</a> &middot; Source code: <a href="https://github.com/sy-borg/passerby-chess">https://github.com/sy-borg/passerby-chess</a></small></p>
 </body>
 </html>`;
 }

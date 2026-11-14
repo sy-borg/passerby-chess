@@ -1,6 +1,6 @@
 // test.js - run with: node test.js
 import { parseFen, perft, START_FEN, sanList } from "./chess.js";
-import { freshStore, tryMove, renderPage, renderBoardSvg, stateJson, agentLabel, cleanWho } from "./app.js";
+import { freshStore, tryMove, renderPage, renderBoardSvg, stateJson, atomXml, agentLabel, cleanWho } from "./app.js";
 
 let failed = 0;
 const check = (name, ok, extra = "") => {
@@ -148,6 +148,54 @@ for (const [name, fen, depth, expected] of perfts) {
   delete old.game.last;
   check("svg: old saved game draws without highlight", renderBoardSvg(old).includes("<svg") && pieces(renderBoardSvg(old)) === 32);
   check("page embeds the picture", renderPage(s, null).includes('src="/board.svg?v=1-3"'));
+}
+
+// 2e. The Atom feed.
+{
+  const s = freshStore();
+  let xml = atomXml(s, "https://chess.example");
+  check("feed: valid atom skeleton", xml.startsWith('<?xml version="1.0"') && xml.includes('<feed xmlns="http://www.w3.org/2005/Atom">') && xml.includes("<title>Passer-By Chess</title>"));
+  check("feed: empty game has no entries", !xml.includes("<entry>"));
+  check("feed: self and page links", xml.includes('href="https://chess.example/atom.xml"') && xml.includes('href="https://chess.example/"'));
+
+  tryMove(s, { ply: 0, move: "e4", ipHash: "A", agent: "Browser (Firefox)", who: "A & B <i>" });
+  tryMove(s, { ply: 1, move: "f6", ipHash: "B", agent: "Claude / Anthropic" });
+  xml = atomXml(s, "https://chess.example");
+  check("feed: one entry per move, newest first", (xml.match(/<entry>/g) || []).length === 2 && xml.indexOf("#g1m2") < xml.indexOf("#g1m1"));
+  check("feed: stable ids for deduplication", xml.includes("<id>https://chess.example/#g1m1</id>") && xml.includes("<id>https://chess.example/#g1m2</id>"));
+  check("feed: move title with mover", xml.includes("Game #1, move 2: 1... f6 (by Claude / Anthropic)</title>"));
+  check("feed: names are escaped", !xml.includes("<i>") && xml.includes("(by A B i"));
+  check("feed: PGN so far in the entry", xml.includes("Moves so far: 1. e4 f6"));
+  check("feed: timestamps recorded", s.game.ts.length === 2 && stateJson(s).move_log[0].ts > 0);
+
+  // Mover names are cleaned before they are stored, so exercise the escaping with a crafted store.
+  const raw = freshStore();
+  raw.game.san = ["e4"];
+  raw.game.by = ["<b>x & y</b>"];
+  check("feed: raw store values are escaped", !atomXml(raw, "https://chess.example").includes("<b>") && atomXml(raw, "https://chess.example").includes("&lt;b&gt;x &amp; y&lt;/b&gt;"));
+
+  // Fool's mate: the finished game becomes an entry, with the PGN.
+  const f = freshStore();
+  ["f3", "e5", "g4", "Qh4#"].forEach((m, i) => tryMove(f, { ply: i, move: m, ipHash: i % 2 ? "B" : "A", agent: i % 2 ? "Claude / Anthropic" : "Browser (Firefox)" }));
+  xml = atomXml(f, "https://chess.example");
+  check("feed: finished game entry", xml.includes("Game #1 ended: Black wins by checkmate (0-1)"));
+  check("feed: finished PGN and players", xml.includes("Moves: 1. f3 e5 2. g4 Qh4#") && xml.includes("Players: Browser"));
+
+  // A running game saved before timestamps existed still feeds (dates fall back to the game's start).
+  const old = freshStore();
+  old.game.san = ["e4", "Nf6"];
+  old.game.fen = "rnbqkb1r/pppppppp/5n2/8/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 1 2";
+  old.game.by = ["unknown", "unknown"];
+  delete old.game.ts;
+  xml = atomXml(old, "https://chess.example");
+  check("feed: old saved game still feeds", (xml.match(/<entry>/g) || []).length === 2 && !xml.includes("NaN") && !xml.includes("Invalid Date"));
+
+  // The feed is capped: lots of moves stay a bounded document.
+  const big = freshStore();
+  big.game.san = Array.from({ length: 300 }, (_, i) => (i % 2 === 0 ? "e4" : "e5"));
+  check("feed: entry count is capped", (atomXml(big, "https://chess.example").match(/<entry>/g) || []).length === 50);
+
+  check("page advertises the feed", renderPage(s, null).includes('rel="alternate" type="application/atom+xml"') && renderPage(s, null).includes('href="/atom.xml"'));
 }
 
 // 3. Random games played to the end through the public functions.

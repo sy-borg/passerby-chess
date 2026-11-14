@@ -21,7 +21,7 @@ This is a Cloudflare Worker project running a shared chess game where visitors p
 - Every move link carries the number of half-moves played so far (`ply`); a stale link is rejected (409) and the current position is shown
 - Illegal moves are rejected (400) with an error page that lists the legal moves again
 - Moves are accepted in SAN (`Nf3`, `exd5`, `O-O`, `e8=Q`) or UCI (`g1f3`, `e7e8q`) notation
-- Each move is logged with who played it: a label derived from the `User-Agent` header, or an optional self-reported name given with `&who=Name` (cleaned to letters, digits, spaces, `.`, `_`, `-`, at most 24 characters). Self-reported names are marked as such and counted
+- Each move is logged with who played it: a label derived from the `User-Agent` header, or an optional self-reported name given with `&who=Name` (cleaned to letters, digits, spaces, `.`, `_`, `-`, at most 24 characters). Self-reported names are marked as such and counted. Each move also records when it was made (`ts`, used by `/atom.xml` and `/api/state`)
 - Game state is maintained in a single Durable Object
 - Uses FEN notation for board positions
 - A game ends on checkmate, stalemate, insufficient material, the fifty-move rule, threefold repetition, or after 300 half-moves (a draw). It is archived (the last 25 are kept) and a new game starts immediately
@@ -31,11 +31,12 @@ This is a Cloudflare Worker project running a shared chess game where visitors p
 - `/` - Main game page showing the board picture, the text board, recent moves and the legal moves as links
 - `/move?ply=N&m=MOVE` - Endpoint for making moves via URL links (optional: `&who=Name`)
 - `/api/state` - JSON API for current game state (FEN, moves, move log with who played each move, legal moves, finished games)
+- `/atom.xml` - Atom feed: recent moves of the current game and finished games, newest first, with per-move timestamps. Cached for 15 seconds, like `/board.svg`
 - `/board.svg` - SVG picture of the current position: last move highlighted, king in check marked, caption with game number, side to move and last move. Cached for 15 seconds, so it is suitable for embedding
 - `/robots.txt` - Allows everything, including `/move`, on purpose so that agents that honor `robots.txt` can play
 
 ## Testing
-The test suite validates chess move generation against known perft values, tests game logic (stale, illegal and repeated moves, checkmate, who-played-it log, self-reported names) and the SVG board picture, and plays complete random games. Run with: `node test.js`
+The test suite validates chess move generation against known perft values, tests game logic (stale, illegal and repeated moves, checkmate, who-played-it log, self-reported names), the SVG board picture and the Atom feed, and plays complete random games. Run with: `node test.js`
 
 ## Deployment
 Uses Cloudflare Workers with Durable Objects. Requires Wrangler CLI:
@@ -47,7 +48,7 @@ Cloudflare can also build and deploy directly from the GitHub repository. In tha
 ## Important Constraints
 - Move validation is strict - illegal moves are rejected
 - Consecutive moves from the same visitor are prohibited
-- Game state persists through Durable Objects; games saved by older versions (missing newer fields such as `by`, `named`, `last` or `stats`) must keep working
+- Game state persists through Durable Objects; games saved by older versions (missing newer fields such as `by`, `named`, `last`, `ts` or `stats`) must keep working
 - Raw IP addresses are never stored, only a short one-way hash
 - The game enforces all chess rules through the rules engine in `chess.js`
 - `/robots.txt` must keep allowing `/move`
