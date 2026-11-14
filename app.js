@@ -137,6 +137,19 @@ function boardText(pos) {
   return rows.join("\n");
 }
 
+// The favicon: a tiny checkerboard, inlined here so no static file is needed (see /favicon.svg in worker.js).
+export const faviconSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 8 8" shape-rendering="crispEdges">
+  <rect width="8" height="8" fill="#F0D9B5"/>
+  <path fill="#B58863" d="M0 0h1v1H0zM2 0h1v1H2zM4 0h1v1H4zM6 0h1v1H6z
+    M1 1h1v1H1zM3 1h1v1H3zM5 1h1v1H5zM7 1h1v1H7z
+    M0 2h1v1H0zM2 2h1v1H2zM4 2h1v1H4zM6 2h1v1H6z
+    M1 3h1v1H1zM3 3h1v1H3zM5 3h1v1H5zM7 3h1v1H7z
+    M0 4h1v1H0zM2 4h1v1H2zM4 4h1v1H4zM6 4h1v1H6z
+    M1 5h1v1H1zM3 5h1v1H3zM5 5h1v1H5zM7 5h1v1H7z
+    M0 6h1v1H0zM2 6h1v1H2zM4 6h1v1H4zM6 6h1v1H6z
+    M1 7h1v1H1zM3 7h1v1H3zM5 7h1v1H5zM7 7h1v1H7z"/>
+</svg>`;
+
 // A picture of the current position as a standalone SVG (works as an <img>, in READMEs, in chats...).
 const GLYPH = { K: "\u265A", Q: "\u265B", R: "\u265C", B: "\u265D", N: "\u265E", P: "\u265F" };
 const PIECE_FONTS = "'Segoe UI Symbol','Apple Symbols','Noto Sans Symbols 2','DejaVu Sans','Arial Unicode MS',sans-serif";
@@ -352,6 +365,7 @@ export function renderPage(store, res) {
 <meta property="og:title" content="Passer-By Chess">
 <meta property="og:description" content="One chess game, one move per visitor. People and AI agents take turns.">
 <meta property="og:type" content="website">
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <link rel="alternate" type="application/atom+xml" title="Passer-By Chess" href="/atom.xml">
 <style>
   :root { color-scheme: light dark; }

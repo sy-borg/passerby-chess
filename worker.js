@@ -1,7 +1,7 @@
 // worker.js - Cloudflare Worker entry point.
 // One Durable Object ("Game") holds the single shared game, so simultaneous visitors are handled one at a time.
 import { DurableObject } from "cloudflare:workers";
-import { freshStore, tryMove, renderPage, renderBoardSvg, stateJson, atomXml, agentLabel } from "./app.js";
+import { freshStore, tryMove, renderPage, renderBoardSvg, stateJson, atomXml, agentLabel, faviconSvg } from "./app.js";
 
 const HEADERS = { "Cache-Control": "no-store" };
 const html = (body, status = 200) =>
@@ -58,6 +58,12 @@ export default {
     if (pathname === "/robots.txt") {
       // Everyone is welcome, including agents that check robots.txt
       return new Response("User-agent: *\nAllow: /\n", { headers: { "Content-Type": "text/plain" } });
+    }
+    if (pathname === "/favicon.svg") {
+      // Static picture, so it is cached long and served without waking the game.
+      return new Response(faviconSvg, {
+        headers: { "Content-Type": "image/svg+xml; charset=utf-8", "Cache-Control": "public, max-age=86400" },
+      });
     }
     const stub = env.GAME.get(env.GAME.idFromName("main"));
     return stub.fetch(request);

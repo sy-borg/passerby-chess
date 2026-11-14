@@ -1,6 +1,6 @@
 // test.js - run with: node test.js
 import { parseFen, perft, START_FEN, sanList } from "./chess.js";
-import { freshStore, tryMove, renderPage, renderBoardSvg, stateJson, atomXml, agentLabel, cleanWho } from "./app.js";
+import { freshStore, tryMove, renderPage, renderBoardSvg, stateJson, atomXml, agentLabel, cleanWho, faviconSvg } from "./app.js";
 
 let failed = 0;
 const check = (name, ok, extra = "") => {
@@ -148,6 +148,8 @@ for (const [name, fen, depth, expected] of perfts) {
   delete old.game.last;
   check("svg: old saved game draws without highlight", renderBoardSvg(old).includes("<svg") && pieces(renderBoardSvg(old)) === 32);
   check("page embeds the picture", renderPage(s, null).includes('src="/board.svg?v=1-3"'));
+  check("page links the favicon", renderPage(s, null).includes('rel="icon" type="image/svg+xml" href="/favicon.svg"'));
+  check("favicon is inline svg", faviconSvg.startsWith("<svg xmlns=") && faviconSvg.trimEnd().endsWith("</svg>"));
 }
 
 // 2e. The Atom feed.
