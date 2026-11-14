@@ -139,8 +139,8 @@ function boardText(pos) {
 
 // The favicon: a tiny checkerboard, inlined here so no static file is needed (see /favicon.svg in worker.js).
 export const faviconSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 8 8" shape-rendering="crispEdges">
-  <rect width="8" height="8" fill="#F0D9B5"/>
-  <path fill="#B58863" d="M0 0h1v1H0zM2 0h1v1H2zM4 0h1v1H4zM6 0h1v1H6z
+  <rect width="8" height="8" fill="#B58863"/>
+  <path fill="#F0D9B5" d="M0 0h1v1H0zM2 0h1v1H2zM4 0h1v1H4zM6 0h1v1H6z
     M1 1h1v1H1zM3 1h1v1H3zM5 1h1v1H5zM7 1h1v1H7z
     M0 2h1v1H0zM2 2h1v1H2zM4 2h1v1H4zM6 2h1v1H6z
     M1 3h1v1H1zM3 3h1v1H3zM5 3h1v1H5zM7 3h1v1H7z
