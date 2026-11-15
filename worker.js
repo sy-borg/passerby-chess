@@ -1,13 +1,24 @@
 // worker.js - Cloudflare Worker entry point.
 // One Durable Object ("Game") holds the single shared game, so simultaneous visitors are handled one at a time.
 import { DurableObject } from "cloudflare:workers";
-import { freshStore, tryMove, renderPage, renderBoardSvg, stateJson, atomXml, agentLabel, faviconSvg } from "./app.js";
+import { freshStore, tryMove, renderPage, renderBoardSvg, stateJson, atomXml, feedTag, agentLabel, faviconSvg } from "./app.js";
 
 const HEADERS = { "Cache-Control": "no-store" };
+const FEED_HEADERS = { "Content-Type": "application/atom+xml; charset=utf-8", "Cache-Control": "public, max-age=15" };
 const html = (body, status = 200) =>
   new Response(body, { status, headers: { ...HEADERS, "Content-Type": "text/html; charset=utf-8" } });
 const json = (obj) =>
   new Response(JSON.stringify(obj, null, 2), { headers: { ...HEADERS, "Content-Type": "application/json" } });
+
+// Whether an If-None-Match header matches an ETag such as "g1-17". Lenient about the weak
+// W/ prefix some readers add, and about "*" ("whatever you have").
+const etagMatch = (inm, etag) =>
+  !!inm &&
+  (inm.trim() === "*" ||
+    inm.split(",").some((t) => {
+      const v = t.trim();
+      return v === etag || v === `W/${etag}`;
+    }));
 
 // Only a short hash of the visitor's IP is kept, to stop one visitor from playing both colours in a row.
 async function hashIp(ip) {
@@ -28,10 +39,14 @@ export class Game extends DurableObject {
     if (url.pathname === "/") return html(renderPage(this.store, null));
     if (url.pathname === "/api/state") return json(stateJson(this.store));
     if (url.pathname === "/atom.xml") {
+      // Strong ETag from game number + ply, which change exactly when the feed content does.
+      // Readers that send If-None-Match get an empty 304 between moves: no XML built, no body sent.
+      const etag = `"${feedTag(this.store)}"`;
+      if (etagMatch(request.headers.get("If-None-Match"), etag)) {
+        return new Response(null, { status: 304, headers: { "Cache-Control": FEED_HEADERS["Cache-Control"], ETag: etag } });
+      }
       // Short cache like the board picture, so feed readers can poll freely without hammering the game.
-      return new Response(atomXml(this.store, url.origin), {
-        headers: { "Content-Type": "application/atom+xml; charset=utf-8", "Cache-Control": "public, max-age=15" },
-      });
+      return new Response(atomXml(this.store, url.origin), { headers: { ...FEED_HEADERS, ETag: etag } });
     }
     if (url.pathname === "/board.svg") {
       // Short cache so embedded copies (READMEs, chats) stay reasonably fresh without hammering the game.
@@ -53,7 +68,7 @@ export class Game extends DurableObject {
 }
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const { pathname } = new URL(request.url);
     if (pathname === "/robots.txt") {
       // Everyone is welcome, including agents that check robots.txt
@@ -64,6 +79,27 @@ export default {
       return new Response(faviconSvg, {
         headers: { "Content-Type": "image/svg+xml; charset=utf-8", "Cache-Control": "public, max-age=86400" },
       });
+    }
+    if (pathname === "/atom.xml" && request.method === "GET") {
+      // Serve repeat polls from the edge cache so the Durable Object is not even woken, and
+      // answer If-None-Match with a 304 there. The cache honours max-age=15, so staleness
+      // stays within the same bound as before. Conditional requests that miss the cache
+      // fall through to the Durable Object, which validates the ETag itself.
+      const cache = caches.default;
+      const cached = await cache.match(request);
+      if (cached) {
+        const etag = cached.headers.get("ETag");
+        if (etag && etagMatch(request.headers.get("If-None-Match"), etag)) {
+          return new Response(null, {
+            status: 304,
+            headers: { "Cache-Control": "public, max-age=15", ETag: etag },
+          });
+        }
+        return cached;
+      }
+      const res = await env.GAME.get(env.GAME.idFromName("main")).fetch(request);
+      if (res.status === 200) ctx.waitUntil(cache.put(request, res.clone()));
+      return res;
     }
     const stub = env.GAME.get(env.GAME.idFromName("main"));
     return stub.fetch(request);

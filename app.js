@@ -256,6 +256,15 @@ const FEED_MAX = 60;      // entries in the feed at most
 
 const isoDate = (ms) => new Date(ms || 0).toISOString();
 
+// A strong ETag validator for the feed: game number and ply together change exactly when the
+// feed's content does. A move bumps the ply; a game end bumps the game number and resets the
+// ply; everything else in the feed (who moved, when, the finished-games list) changes only
+// together with those two.
+export function feedTag(store) {
+  const g = store.game;
+  return `g${g.n}-${g.san.length}`;
+}
+
 // Replay SAN moves from the starting position, returning the position after each move.
 // Tolerates crafted or corrupt move lists: the first move that cannot be replayed ends the
 // replay, and entries for moves after it simply show text without a board.

@@ -1,6 +1,6 @@
 // test.js - run with: node test.js
 import { parseFen, perft, START_FEN, sanList } from "./chess.js";
-import { freshStore, tryMove, renderPage, renderBoardSvg, stateJson, atomXml, agentLabel, cleanWho, faviconSvg } from "./app.js";
+import { freshStore, tryMove, renderPage, renderBoardSvg, stateJson, atomXml, feedTag, agentLabel, cleanWho, faviconSvg } from "./app.js";
 
 let failed = 0;
 const check = (name, ok, extra = "") => {
@@ -172,6 +172,7 @@ for (const [name, fen, depth, expected] of perfts) {
   check("feed: board shows the position after the move", xml.includes("4  . . . . P . . .") && xml.includes("6  . . . . . p . ."));
   check("feed: FEN after the move", xml.includes("FEN: rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1"));
   check("feed: timestamps recorded", s.game.ts.length === 2 && stateJson(s).move_log[0].ts > 0);
+  check("feed: etag validator follows moves", feedTag(freshStore()) === "g1-0" && feedTag(s) === "g1-2");
 
   // Mover names are cleaned before they are stored, so exercise the escaping with a crafted store.
   const raw = freshStore();
@@ -187,6 +188,8 @@ for (const [name, fen, depth, expected] of perfts) {
   check("feed: finished PGN and players", xml.includes("Moves: 1. f3 e5 2. g4 Qh4#") && xml.includes("Players: Browser"));
   check("feed: finished entry shows the final board", xml.includes("4  . . . . . . P q") && xml.includes("3  . . . . . P . ."));
   check("feed: finished entry shows the final FEN", xml.includes("FEN: rnb1kbnr/pppp1ppp/8/4p3/6Pq/5P2/PPPPP2P/RNBQKBNR w KQkq - 1 3"));
+  // A game end bumps the game number and resets the ply, so the ETag changes there too.
+  check("feed: etag validator follows game ends", feedTag(f) === "g2-0");
 
   // A running game saved before timestamps existed still feeds (dates fall back to the game's start).
   const old = freshStore();

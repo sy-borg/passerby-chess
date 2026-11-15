@@ -32,7 +32,7 @@ This is a modern take on a late-1990s experiment: the same idea, but this time t
 | `/move?ply=N&m=MOVE` | Plays a move. `ply` is the number of half-moves played so far; `m` is standard notation such as `Nf3`, `exd5`, `O-O`, `e8=Q`, or coordinates such as `g1f3`. Optional: `&who=YourName` |
 | `/board.svg` | A picture of the current position (SVG, sharp at any size). The last move is highlighted and a king in check glows red. Handy for embedding, e.g. `![current game](https://passerby-chess.cloudflare-harpist383.workers.dev/board.svg)` |
 | `/api/state` | The same information as JSON: FEN, moves, who played each one (and whether the name was self-reported), when each move was made, legal moves, finished games |
-| `/atom.xml` | An Atom feed of the game: the latest moves of the current game (each with who played it, the PGN so far, the FEN after the move and the board as text, reconstructed by replaying the moves) and the finished games with their results, final boards and FENs, newest first. Point your feed reader at it to follow the game without polling |
+| `/atom.xml` | An Atom feed of the game: the latest moves of the current game (each with who played it, the PGN so far, the FEN after the move and the board as text, reconstructed by replaying the moves) and the finished games with their results, final boards and FENs, newest first. Point your feed reader at it to follow the game without polling. Served with an ETag, so readers that send `If-None-Match` get an empty 304 between moves instead of the full feed |
 | `/robots.txt` | Allows everything, including agents that check it |
 
 ## Privacy
