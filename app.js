@@ -246,12 +246,33 @@ export function stateJson(store) {
 }
 
 // An Atom feed of the latest moves and finished games, newest first. Entries are self-contained:
-// the link always points at the live game, so the entry text carries the move, who played it and the PGN so far.
+// the link always points at the live game, so the entry text carries the move, who played it, the PGN so far
+// and the FEN after the move. Each entry also shows the board as it stood after the move, as text, wrapped in a
+// <pre> so feed readers keep the layout. Only the current position is stored, so boards and FENs are reconstructed
+// by replaying the moves from the starting position - once per feed render, not once per entry.
 const FEED_MOVES = 50;    // how many moves of the current game to include
 const FEED_FINISHED = 10; // how many finished games to include
 const FEED_MAX = 60;      // entries in the feed at most
 
 const isoDate = (ms) => new Date(ms || 0).toISOString();
+
+// Replay SAN moves from the starting position, returning the position after each move.
+// Tolerates crafted or corrupt move lists: the first move that cannot be replayed ends the
+// replay, and entries for moves after it simply show text without a board.
+function replay(sans) {
+  const out = [];
+  let pos = parseFen(START_FEN);
+  for (const san of sans) {
+    const hit = findMove(pos, san);
+    if (!hit) break;
+    pos = make(pos, hit.m);
+    out.push(pos);
+  }
+  return out;
+}
+
+// The move list of a stored PGN string ("1. e4 e5 2. Nf3 ..."), for replaying finished games.
+const sansOfPgn = (pgn) => String(pgn || "").split(/\s+/).filter((t) => t && !/^\d+\.+$/.test(t));
 
 export function atomXml(store, base = "") {
   const root = String(base || "").replace(/\/+$/, "");
@@ -263,6 +284,7 @@ export function atomXml(store, base = "") {
   const by = g.by || [];
   const named = g.named || [];
   const start = Math.max(0, g.san.length - FEED_MOVES);
+  const positions = replay(g.san);
   g.san.slice(start).forEach((san, k) => {
     const i = start + k;
     const n = i + 1;
@@ -270,27 +292,35 @@ export function atomXml(store, base = "") {
     const self = Boolean(named[i]);
     const label = `${Math.floor(i / 2) + 1}${i % 2 === 0 ? "." : "..."} ${san}`;
     const mover = who !== "unknown" ? ` (by ${who}${self ? ", self-reported" : ""})` : "";
+    const body =
+      `Move ${n} in game #${g.n}: ${i % 2 === 0 ? "White" : "Black"} plays ${san}` +
+      `${mover ? `, played by ${who}${self ? " (self-reported)" : ""}` : ""}. ` +
+      `Moves so far: ${pgnOf(g.san.slice(0, n))}` +
+      (positions[i] ? `. FEN: ${toFen(positions[i])}` : "");
     entries.push({
       updated: ts[i] || started,
       id: `${root}/#g${g.n}m${n}`,
       title: `Game #${g.n}, move ${n}: ${label}${mover}`,
-      content:
-        `Move ${n} in game #${g.n}: ${i % 2 === 0 ? "White" : "Black"} plays ${san}` +
-        `${mover ? `, played by ${who}${self ? " (self-reported)" : ""}` : ""}. ` +
-        `Moves so far: ${pgnOf(g.san.slice(0, n))}`,
+      html: `${positions[i] ? `<pre>${esc(boardText(positions[i]))}</pre>\n` : ""}<p>${esc(body)}</p>`,
     });
   });
 
   (store.finished || []).slice(0, FEED_FINISHED).forEach((f) => {
     const players = [...new Set(f.by || [])].filter((x) => x !== "unknown").join(", ");
+    const sans = sansOfPgn(f.pgn);
+    const finalPos = replay(sans);
+    const board = finalPos.length ? boardText(finalPos[finalPos.length - 1]) : "";
+    // Only claim a FEN if every move of the game could be replayed.
+    const fen = sans.length && finalPos.length === sans.length ? ` FEN: ${toFen(finalPos[finalPos.length - 1])}` : "";
+    const body =
+      `Game #${f.n} is over after ${f.plies} half-moves: ${winnerText(f.result)} by ${f.reason} (${f.result}). ` +
+      (players ? `Players: ${players}. ` : "") +
+      `Moves: ${f.pgn}${fen}`;
     entries.push({
       updated: f.ended || started,
       id: `${root}/#g${f.n}end`,
       title: `Game #${f.n} ended: ${winnerText(f.result)} by ${f.reason} (${f.result})`,
-      content:
-        `Game #${f.n} is over after ${f.plies} half-moves: ${winnerText(f.result)} by ${f.reason} (${f.result}). ` +
-        (players ? `Players: ${players}. ` : "") +
-        `Moves: ${f.pgn}`,
+      html: `${board ? `<pre>${esc(board)}</pre>\n` : ""}<p>${esc(body)}</p>`,
     });
   });
 
@@ -303,13 +333,13 @@ export function atomXml(store, base = "") {
 <link rel="alternate" type="text/html" href="${esc(root)}/"/>
 <id>${esc(e.id)}</id>
 <updated>${isoDate(e.updated)}</updated>
-<content type="text">${esc(e.content)}</content>
+<content type="html">${e.html}</content>
 </entry>`;
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <feed xmlns="http://www.w3.org/2005/Atom">
 <title>Passer-By Chess</title>
-<subtitle>A chess game played one move at a time by whoever stops by: people and AI agents.</subtitle>
+<subtitle>A chess game played one move at a time by whoever stops by: people and AI agents. The board in each entry is text: uppercase = White, lowercase = Black, "." = empty.</subtitle>
 <link rel="alternate" type="text/html" href="${esc(root)}/"/>
 <link rel="self" href="${esc(root)}/atom.xml"/>
 <id>${esc(root)}/</id>

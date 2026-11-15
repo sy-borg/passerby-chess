@@ -168,6 +168,9 @@ for (const [name, fen, depth, expected] of perfts) {
   check("feed: move title with mover", xml.includes("Game #1, move 2: 1... f6 (by Claude / Anthropic)</title>"));
   check("feed: names are escaped", !xml.includes("<i>") && xml.includes("(by A B i"));
   check("feed: PGN so far in the entry", xml.includes("Moves so far: 1. e4 f6"));
+  check("feed: board as html in a pre block", xml.includes('<content type="html">') && xml.includes("<pre>") && !xml.includes("&amp;lt;"));
+  check("feed: board shows the position after the move", xml.includes("4  . . . . P . . .") && xml.includes("6  . . . . . p . ."));
+  check("feed: FEN after the move", xml.includes("FEN: rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1"));
   check("feed: timestamps recorded", s.game.ts.length === 2 && stateJson(s).move_log[0].ts > 0);
 
   // Mover names are cleaned before they are stored, so exercise the escaping with a crafted store.
@@ -182,6 +185,8 @@ for (const [name, fen, depth, expected] of perfts) {
   xml = atomXml(f, "https://chess.example");
   check("feed: finished game entry", xml.includes("Game #1 ended: Black wins by checkmate (0-1)"));
   check("feed: finished PGN and players", xml.includes("Moves: 1. f3 e5 2. g4 Qh4#") && xml.includes("Players: Browser"));
+  check("feed: finished entry shows the final board", xml.includes("4  . . . . . . P q") && xml.includes("3  . . . . . P . ."));
+  check("feed: finished entry shows the final FEN", xml.includes("FEN: rnb1kbnr/pppp1ppp/8/4p3/6Pq/5P2/PPPPP2P/RNBQKBNR w KQkq - 1 3"));
 
   // A running game saved before timestamps existed still feeds (dates fall back to the game's start).
   const old = freshStore();
@@ -196,6 +201,9 @@ for (const [name, fen, depth, expected] of perfts) {
   const big = freshStore();
   big.game.san = Array.from({ length: 300 }, (_, i) => (i % 2 === 0 ? "e4" : "e5"));
   check("feed: entry count is capped", (atomXml(big, "https://chess.example").match(/<entry>/g) || []).length === 50);
+  // Only the first two of the fake moves can be replayed; later entries keep their text but have no board.
+  const bigXml = atomXml(big, "https://chess.example");
+  check("feed: entries beyond replayable moves show text without a board", bigXml.includes("<p>Move 300") && bigXml.includes("<p>Move 251") && !bigXml.includes("<pre>") && !bigXml.includes("FEN:"));
 
   check("page advertises the feed", renderPage(s, null).includes('rel="alternate" type="application/atom+xml"') && renderPage(s, null).includes('href="/atom.xml"'));
 }

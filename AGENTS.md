@@ -31,7 +31,7 @@ This is a Cloudflare Worker project running a shared chess game where visitors p
 - `/` - Main game page showing the board picture, the text board, recent moves and the legal moves as links
 - `/move?ply=N&m=MOVE` - Endpoint for making moves via URL links (optional: `&who=Name`)
 - `/api/state` - JSON API for current game state (FEN, moves, move log with who played each move, legal moves, finished games)
-- `/atom.xml` - Atom feed: recent moves of the current game and finished games, newest first, with per-move timestamps. Cached for 15 seconds, like `/board.svg`
+- `/atom.xml` - Atom feed: recent moves of the current game and finished games, newest first, with per-move timestamps. Each entry shows the board after that move as text and the FEN, reconstructed by replaying the moves from the starting position (one replay pass per feed render). Cached for 15 seconds, like `/board.svg`
 - `/board.svg` - SVG picture of the current position: last move highlighted, king in check marked, caption with game number, side to move and last move. Cached for 15 seconds, so it is suitable for embedding
 - `/favicon.svg` - The favicon (a tiny checkerboard), with its SVG contents inlined in `app.js` (`faviconSvg`). Static, so cached for a day and served without waking the Durable Object
 - `/robots.txt` - Allows everything, including `/move`, on purpose so that agents that honor `robots.txt` can play
