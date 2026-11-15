@@ -169,6 +169,7 @@ for (const [name, fen, depth, expected] of perfts) {
   check("feed: names are escaped", !xml.includes("<i>") && xml.includes("(by A B i"));
   check("feed: PGN so far in the entry", xml.includes("Moves so far: 1. e4 f6"));
   check("feed: board as html in a pre block", xml.includes('<content type="html">') && xml.includes("<pre>") && !xml.includes("&amp;lt;"));
+  check("feed: html content is CDATA-wrapped", xml.includes('<content type="html"><![CDATA[') && xml.includes("]]></content>"));
   check("feed: board shows the position after the move", xml.includes("4  . . . . P . . .") && xml.includes("6  . . . . . p . ."));
   check("feed: FEN after the move", xml.includes("FEN: rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1"));
   check("feed: timestamps recorded", s.game.ts.length === 2 && stateJson(s).move_log[0].ts > 0);

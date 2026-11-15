@@ -337,12 +337,18 @@ export function atomXml(store, base = "") {
   entries.forEach((e, seq) => (e.seq = seq));
   entries.sort((a, b) => b.updated - a.updated || b.seq - a.seq);
   const top = entries.slice(0, FEED_MAX);
+  // For type="html", RFC 4287 says the content MUST NOT contain child elements and its markup
+  // MUST be escaped, so the XML parser sees only text. Entity-encoding would re-escape the
+  // already-escaped user text, so wrap in CDATA instead: the standard XML way to keep literal
+  // markup. CDATA sections cannot contain "]]>", so split it defensively (it cannot occur
+  // today: "<", ">" and "&" are escaped everywhere in the content, but stay robust anyway).
+  const cdata = (s) => s.replace(/\]\]>/g, "]]]]><![CDATA[>");
   const entryXml = (e) => `<entry>
 <title>${esc(e.title)}</title>
 <link rel="alternate" type="text/html" href="${esc(root)}/"/>
 <id>${esc(e.id)}</id>
 <updated>${isoDate(e.updated)}</updated>
-<content type="html">${e.html}</content>
+<content type="html"><![CDATA[${cdata(e.html)}]]></content>
 </entry>`;
 
   return `<?xml version="1.0" encoding="UTF-8"?>
