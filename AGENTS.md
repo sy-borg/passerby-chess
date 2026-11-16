@@ -28,11 +28,11 @@ This is a Cloudflare Worker project running a shared chess game where visitors p
 - Tunable constants are at the top of `app.js`: `MAX_PLIES` and `NO_CONSECUTIVE_IP`
 
 ## Key Endpoints
-- `/` - Main game page showing the board picture, the text board, recent moves and the legal moves as links
+- `/` - Main game page showing the board picture, the text board, recent moves and the legal moves as links. Served with the same ETag as `/atom.xml` and edge-cached for 15 seconds, so repeat polls do not wake the Durable Object; `/move` responses stay uncached
 - `/move?ply=N&m=MOVE` - Endpoint for making moves via URL links (optional: `&who=Name`)
 - `/api/state` - JSON API for current game state (FEN, moves, move log with who played each move, legal moves, finished games)
 - `/atom.xml` - Atom feed: recent moves of the current game and finished games, newest first, with per-move timestamps. Each entry shows the board after that move as text and the FEN, reconstructed by replaying the moves from the starting position (one replay pass per feed render). Served with a strong ETag (`"g{game}-{ply}"`): readers sending `If-None-Match` get empty 304s between moves, and repeat polls are served from the edge cache without waking the Durable Object. Cached for 15 seconds, like `/board.svg`
-- `/board.svg` - SVG picture of the current position: last move highlighted, king in check marked, caption with game number, side to move and last move. Cached for 15 seconds, so it is suitable for embedding
+- `/board.svg` - SVG picture of the current position: last move highlighted, king in check marked, caption with game number, side to move and last move. Served with the same ETag as `/atom.xml` and edge-cached for 15 seconds, so it is suitable for embedding
 - `/favicon.svg` - The favicon (a tiny checkerboard), with its SVG contents inlined in `app.js` (`faviconSvg`). Static, so cached for a day and served without waking the Durable Object
 - `/robots.txt` - Allows everything, including `/move`, on purpose so that agents that honor `robots.txt` can play
 

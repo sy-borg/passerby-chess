@@ -4,7 +4,6 @@ import { DurableObject } from "cloudflare:workers";
 import { freshStore, tryMove, renderPage, renderBoardSvg, stateJson, atomXml, feedTag, agentLabel, faviconSvg } from "./app.js";
 
 const HEADERS = { "Cache-Control": "no-store" };
-const FEED_HEADERS = { "Content-Type": "application/atom+xml; charset=utf-8", "Cache-Control": "public, max-age=15" };
 const html = (body, status = 200) =>
   new Response(body, { status, headers: { ...HEADERS, "Content-Type": "text/html; charset=utf-8" } });
 const json = (obj) =>
@@ -19,6 +18,19 @@ const etagMatch = (inm, etag) =>
       const v = t.trim();
       return v === etag || v === `W/${etag}`;
     }));
+
+// The page, the board picture and the feed are all pure functions of the game state, so they share
+// one validator and one freshness window. The ETag is the feed tag ("g{game}-{ply}"), which changes
+// exactly when their content does: a move bumps the ply, a game end bumps the game number and resets
+// the ply. Readers that send If-None-Match get an empty 304 between moves: nothing rendered, no body sent.
+const STATE_HEADERS = { "Cache-Control": "public, max-age=15" };
+const serveState = (request, store, contentType, render) => {
+  const etag = `"${feedTag(store)}"`;
+  if (etagMatch(request.headers.get("If-None-Match"), etag)) {
+    return new Response(null, { status: 304, headers: { ...STATE_HEADERS, ETag: etag } });
+  }
+  return new Response(render(), { headers: { ...STATE_HEADERS, "Content-Type": contentType, ETag: etag } });
+};
 
 // Only a short hash of the visitor's IP is kept, to stop one visitor from playing both colours in a row.
 async function hashIp(ip) {
@@ -36,24 +48,13 @@ export class Game extends DurableObject {
 
   async fetch(request) {
     const url = new URL(request.url);
-    if (url.pathname === "/") return html(renderPage(this.store, null));
+    if (url.pathname === "/") return serveState(request, this.store, "text/html; charset=utf-8", () => renderPage(this.store, null));
     if (url.pathname === "/api/state") return json(stateJson(this.store));
-    if (url.pathname === "/atom.xml") {
-      // Strong ETag from game number + ply, which change exactly when the feed content does.
-      // Readers that send If-None-Match get an empty 304 between moves: no XML built, no body sent.
-      const etag = `"${feedTag(this.store)}"`;
-      if (etagMatch(request.headers.get("If-None-Match"), etag)) {
-        return new Response(null, { status: 304, headers: { "Cache-Control": FEED_HEADERS["Cache-Control"], ETag: etag } });
-      }
-      // Short cache like the board picture, so feed readers can poll freely without hammering the game.
-      return new Response(atomXml(this.store, url.origin), { headers: { ...FEED_HEADERS, ETag: etag } });
-    }
-    if (url.pathname === "/board.svg") {
+    if (url.pathname === "/atom.xml")
+      return serveState(request, this.store, "application/atom+xml; charset=utf-8", () => atomXml(this.store, url.origin));
+    if (url.pathname === "/board.svg")
       // Short cache so embedded copies (READMEs, chats) stay reasonably fresh without hammering the game.
-      return new Response(renderBoardSvg(this.store), {
-        headers: { "Content-Type": "image/svg+xml; charset=utf-8", "Cache-Control": "public, max-age=15" },
-      });
-    }
+      return serveState(request, this.store, "image/svg+xml; charset=utf-8", () => renderBoardSvg(this.store));
     if (url.pathname === "/move") {
       const ply = parseInt(url.searchParams.get("ply") ?? "", 10);
       const move = (url.searchParams.get("m") ?? "").slice(0, 20);
@@ -80,11 +81,12 @@ export default {
         headers: { "Content-Type": "image/svg+xml; charset=utf-8", "Cache-Control": "public, max-age=86400" },
       });
     }
-    if (pathname === "/atom.xml" && request.method === "GET") {
-      // Serve repeat polls from the edge cache so the Durable Object is not even woken, and
-      // answer If-None-Match with a 304 there. The cache honours max-age=15, so staleness
-      // stays within the same bound as before. Conditional requests that miss the cache
-      // fall through to the Durable Object, which validates the ETag itself.
+    if (request.method === "GET" && ["/", "/atom.xml", "/board.svg"].includes(pathname)) {
+      // Serve repeat polls of the page, the feed and the board picture from the edge cache so the
+      // Durable Object is not even woken, and answer If-None-Match with a 304 there. The cache
+      // honours max-age=15, so staleness stays within the same bound as before. Conditional
+      // requests that miss the cache fall through to the Durable Object, which validates the
+      // ETag itself. Move pages (/move) never come through here, so they stay uncached and fresh.
       const cache = caches.default;
       const cached = await cache.match(request);
       if (cached) {
